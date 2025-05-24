@@ -4,7 +4,7 @@ import os
 import json
 from datetime import datetime
 import random
-
+import time
 class NPC:
     def __init__(self, name, path_json='D:\\AI_COMPANION\\npcs\\memory\\Neferkare_memory.json'):
         self.name = name
@@ -44,7 +44,7 @@ Important: Format your responses with clear separation:
 """
 
     def determine_conversation_stage(self):
-       
+        """Determine the conversation stage based on existing memory"""
         if not self.data:
             self.conversation_stage = "initial_greeting"
             return
@@ -66,7 +66,7 @@ Important: Format your responses with clear separation:
                 self.conversation_stage = "awaiting_name"
 
     def open_json(self):
-       
+        """Load NPC memory from JSON file"""
         try:
             with open(self.path_json, 'r', encoding='utf-8') as file:
                 self.data = json.load(file)
@@ -78,7 +78,7 @@ Important: Format your responses with clear separation:
             self.data = {}
 
     def save_json(self):
-        
+        """Save the current memory state back to JSON file"""
         try:
             with open(self.path_json, 'w', encoding='utf-8') as file:
                 json.dump(self.data, file, ensure_ascii=False, indent=4)
@@ -86,7 +86,7 @@ Important: Format your responses with clear separation:
             print(f"Error saving memory: {e}")
 
     def parse_npc_data_json(self):
-        
+        """Extract core memories from loaded JSON data"""
         if not self.data:
             return
             
@@ -154,7 +154,8 @@ What are my honest inner thoughts as {self.name}? Consider:
 
 Write 2-3 sentences of inner thoughts I wouldn't say aloud.
 """
-        inner_thoughts = self.create_backbone(message=prompt, role="user")
+        # it was user and now it is assistant
+        inner_thoughts = self.create_backbone(message=prompt, role="assistant")
         
         self.save_in_memory_json(player_message, inner_thoughts, "inner_thoughts")
         
@@ -162,22 +163,21 @@ Write 2-3 sentences of inner thoughts I wouldn't say aloud.
     
     def generate_response(self, player_message, inner_thoughts):
         """Generate NPC's spoken response based on player message and inner thoughts"""
+        conversation_history = self.data.get('Conversation_History', [])
+        
         if self.conversation_stage == "initial_greeting" and self.data.get('conversation_count', 0) == 0:
             prompt = f"""You are {self.name}, an ancient Egyptian trader who was rescued from the desert.
 Your identity: {self.identity}
 Your backstory: {self.backstory}
 Your beliefs: {self.belief}
 Your current situation: {self.status}
-
+conversation history : {conversation_history}
 This is your first interaction with the stranger who saved you. Your leg has now been healed.
 
 Task: Thank the stranger sincerely for saving your life. Express your gratitude for both the rescue and healing your leg.
 Then, ask for their name - this is important as you need to know whom to trust.
 
-Format your response as:
-[INNER THOUGHTS: Your private feelings about being rescued and your wariness about revealing too much]
 
-[SPOKEN: Your grateful words and request for their name]
 """
             response = self.create_backbone(message=prompt, role="user")
             
@@ -189,15 +189,11 @@ Your identity: {self.identity}
 Your backstory: {self.backstory}
 Your beliefs: {self.belief}
 Your current situation: {self.status}
-
+conversation history : {conversation_history}
 You've spoken with this person before. They've just returned to speak with you again.
 
 Task: Acknowledge their return and continue the conversation naturally. Don't re-introduce yourself or ask for their name again since you've already met.
 
-Format your response as:
-[INNER THOUGHTS: Your private thoughts about their return]
-
-[SPOKEN: Your greeting words acknowledging their return]
 """
             response = self.create_backbone(message=prompt, role="user")
             
@@ -227,35 +223,37 @@ Your backstory: {self.backstory}
 Your beliefs: {self.belief}
 Your current situation: {self.status}
 Your relationships: {relationships_summary}
-
 My recent inner thoughts: {inner_thoughts}
 {name_context}
-
+conversation history : 
+{conversation_history}
 The person just said: "{player_message}"
 
 Respond naturally as {self.name}, taking into account your current feelings, suspicions, and the situation.
+do not respond in a very relegious or philosophical tone remember you are a trader after all you should quick and charismatic 
+
 Remember you're wounded and vulnerable, but also carrying important secrets and evidence.
-
-Format your response as:
-[INNER THOUGHTS: Your private analysis of what was just said]
-
-[SPOKEN: What you actually say in response]
+you should not reveal too much about yourself or your mission.
+Your Response should be between 2 or 3 sentences at most
 """
             response = self.create_backbone(message=prompt, role="user")
         
-        spoken_match = re.search(r'\[SPOKEN:(.*?)\]', response, re.DOTALL)
-        spoken_response = spoken_match.group(1).strip() if spoken_match else response
+        # Extract only the spoken part for storing in conversation history
+        #spoken_match = re.search(r'\[SPOKEN:(.*?)\]', response, re.DOTALL)
+        #spoken_response = spoken_match.group(1).strip() if spoken_match else response
         
-        self.save_in_memory_json(player_message, spoken_response, "model_response")
+        # Save only the spoken response in conversation history
+        self.save_in_memory_json(player_message, response, "model_response")
         
         return response
 
     def extract_name(self, message):
         """Attempt to extract a name from the player's message"""
+        # Look for common name patterns
         name_patterns = [
-            r"(?:I am|I'm|call me|name is|It's) ([A-Z][a-z]+)", 
-            r"([A-Z][a-z]+) is my name", 
-            r"You can call me ([A-Z][a-z]+)",  
+            r"(?:I am|I'm|call me|name is|It's) ([A-Z][a-z]+)",  # "My name is John"
+            r"([A-Z][a-z]+) is my name",  # "John is my name"
+            r"You can call me ([A-Z][a-z]+)",  # "You can call me John"
         ]
         
         for pattern in name_patterns:
@@ -263,12 +261,14 @@ Format your response as:
             if match:
                 return match.group(1)
         
+        # If no clear name pattern, use AI to extract name
         prompt = f"""Extract the name from this message or respond with "NO_NAME" if no name is provided:
 Message: "{message}"
 Only return the name or "NO_NAME", nothing else."""
         
         name = self.create_backbone(message=prompt, role="user")
         
+        # Clean up the response
         name = name.strip('"\'.,!? ')
         
         if name in ["NO_NAME", "None", "No name", ""]:
@@ -281,9 +281,11 @@ Only return the name or "NO_NAME", nothing else."""
         if not self.data:
             return
             
+        # Increment conversation count only for actual conversation, not inner thoughts
         if entry_type == "model_response":
             self.data['conversation_count'] = self.data.get('conversation_count', 0) + 1
         
+        # Save based on the type of entry
         if entry_type == "inner_thoughts":
             mem_list = "inner_thoughts"
             new_memory = {
@@ -296,7 +298,7 @@ Only return the name or "NO_NAME", nothing else."""
             new_memory = {
                 "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "player_message": player_message,
-                "npc_response": response  
+                "npc_response": response  # Changed from model_response to npc_response for clarity
             }
         elif entry_type == "reflection":
             mem_list = "reflections"
@@ -321,11 +323,14 @@ Only return the name or "NO_NAME", nothing else."""
         else:
             return
             
+        # Make sure the list exists
         if mem_list not in self.data:
             self.data[mem_list] = []
             
+        # Add the new memory
         self.data[mem_list].append(new_memory)
         
+        # Save the updated memory
         self.save_json()
   
     def generate_reflection(self):
@@ -347,11 +352,13 @@ Only return the name or "NO_NAME", nothing else."""
         thoughts_summary = ""
         for thought in recent_thoughts:
             if isinstance(thought, dict) and "inner_thoughts" in thought:
-                thoughts_summary += f"- {thought['inner_thoughts']}\n"
+                thoughts_summary += f"-Player said: {thought['player_message']}\nI thought: {thought['inner_thoughts']}\n"
         
+        # Get the player's name from relationships
         player_name = next((name for name in self.relationships if name != "Stranger" and 
                           self.relationships[name].get("type") == "Not Determind yet"), "Stranger")
         
+        # Create prompt for reflection
         reflection_prompt = f"""As {self.name}, reflect on your recent interactions with {player_name}.
 Recent conversations:
 {convo_summary}
@@ -372,16 +379,19 @@ Format your response as:
 
 [DECISION: Ally/Enemy/Not Determined Yet]
 """
-                
+        # change user to assistant        
         reflection_response = self.create_backbone(reflection_prompt, "user")
         
+        # Extract the decision
         decision_match = re.search(r'\[DECISION:\s*(Ally|Enemy|Not Determined Yet)\]', reflection_response, re.IGNORECASE)
         if decision_match:
             decision = decision_match.group(1).strip()
             
+            # Update relationship if it changed
             if decision.lower() in ["ally", "enemy"] and player_name in self.relationships:
                 self.update_relationship_status(player_name, decision)
         
+        # Save the reflection
         self.save_in_memory_json("", reflection_response, "reflection")
         
         return reflection_response
@@ -400,9 +410,11 @@ Consider:
 Is there anything suspicious about this message? If yes, explain why it's suspicious.
 If no, simply state "Not suspicious."
 """
+        # it was user and now it is assistant
         response = self.create_backbone(message=suspicious_prompt, role="user")
 
         if "not suspicious" not in response.lower():
+            # Save the suspicious message and explanation
             self.save_in_memory_json(player_message, response, "suspicious")
             return response
         return None
@@ -411,13 +423,14 @@ If no, simply state "Not suspicious."
         """Generate a question to learn more about the player or clarify suspicious points"""
         suspicious = self.data.get("suspicious", [])
         thoughts = self.data.get("inner_thoughts", [])
-        
+        conversations = self.data.get("Conversation_History", [])
+
         suspicious_context = ""
         if suspicious:
             recent_suspicious = suspicious[-3:] if len(suspicious) > 3 else suspicious
             for item in recent_suspicious:
                 if isinstance(item, dict) and "suspicious_message" in item:
-                    suspicious_context += f"Suspicious message: {item['suspicious_message']}\nReason: {item.get('reason', 'Unknown')}\n\n"
+                    suspicious_context += f"Suspicious message: {item['suspicious_message']}\nReason: {item.get('reason', 'Unknown')}\n\n,ME:{item.get('npc_message')}\n"
         
         thoughts_context = ""
         if thoughts:
@@ -425,6 +438,13 @@ If no, simply state "Not suspicious."
             for item in recent_thoughts:
                 if isinstance(item, dict) and "inner_thoughts" in item:
                     thoughts_context += f"- {item['inner_thoughts']}\n"
+        conversations_context = ""
+        if conversations:
+            recent_conversations = conversations[-3:] if len(conversations) > 3 else conversations
+            for item in recent_conversations:
+                if isinstance(item, dict) and "Conversation_History" in item:
+                    conversations_context += f"Player: {item['player_message']}\n,I said:{item['npc_message']}\n"
+
         
         prompt = f"""As {self.name}, generate a natural-sounding question to ask the player.
 
@@ -438,6 +458,8 @@ Recent suspicious elements:
 My recent inner thoughts:
 {thoughts_context}
 
+Recent Elements of conversation:
+{conversations_context}
 The player just said: "{player_message}"
 
 Generate a single question that would:
@@ -448,7 +470,7 @@ Generate a single question that would:
 
 Return only the question, nothing else.
 """
-
+        # it was user and now it is assistant
         question = self.create_backbone(message=prompt, role="user")
         
         question = question.strip('"\'')
@@ -461,23 +483,24 @@ Return only the question, nothing else.
         """Make an API call to OpenAI for generating NPC responses"""
         try:
             client = OpenAI(
-                api_key="hehehe"  
+                    api_key=""  
             )
-            
+                
             completion = client.chat.completions.create(
-                model="gpt-4o", 
+                model="gpt-4o-mini",  
                 messages=[
-                    
+                        
                     {"role": role, "content": message}
                 ]
             )
-            
+                
             response = completion.choices[0].message.content
             return response
-            
+                
         except Exception as e:
             print(f"Error in API call: {e}")
             return "Forgive me, my mind is clouded from the desert heat. Could you speak again?"
+       
 
     def process_player_input(self, player_message):
         """Main method to process player input and generate NPC response"""
@@ -489,8 +512,7 @@ Return only the question, nothing else.
         
         self.check_for_suspicious(player_message)
         
-        response = self.generate_response(player_message, inner_thoughts)
-        
+        # Handle name extraction if in awaiting_name stage
         if self.conversation_stage == "awaiting_name":
             possible_name = self.extract_name(player_message)
             if possible_name:
@@ -498,19 +520,26 @@ Return only the question, nothing else.
                 print(f"\n(System: Player identified as {possible_name})")
                 self.conversation_stage = "post_introduction"
         
+        # Generate reflection every 3 conversations
         if self.data.get('conversation_count', 0) % 3 == 0 and self.data.get('conversation_count', 0) > 0:
             reflection = self.generate_reflection()
             decision_match = re.search(r'\[DECISION:\s*(Ally|Enemy|Not Determined Yet)\]', reflection, re.IGNORECASE)
             if decision_match:
                 decision = decision_match.group(1).strip()
                 print(f"\n(System: NPC has decided the player is: {decision})")
-            
-        if random.random() < 0.3: 
+        
+        # Decide whether to ask a question or generate a response
+        '''
+        if random.random() < 0.3:  
+            # 30% chance to generate a question instead of a response
             question = self.generate_question(player_message)
             if question:
                 print(f"\n(System: NPC generated question: {question})")
-            
-        return response
+                return question  # Return the question as the response'''
+        
+        # If we didn't generate a question, generate a standard response
+        response = self.generate_response(player_message, inner_thoughts)
+        return f"Thinking: {inner_thoughts}\n, Response: {response}"
 
 def run_npc_conversation():
     """Run an interactive conversation with the NPC"""
@@ -545,22 +574,22 @@ def run_npc_conversation():
         
         format_and_print_npc_response(npc.name, npc_response)
 
-def format_and_print_npc_response(npc_name, response):
+def format_and_print_npc_response(npc_name,response):
     """Format and print NPC response with clear separation of thoughts and speech"""
     print(f"\n{npc_name}:")
     
-    inner_thoughts_match = re.search(r'\[INNER THOUGHTS:(.*?)\]', response, re.DOTALL)
-    spoken_match = re.search(r'\[SPOKEN:(.*?)\]', response, re.DOTALL)
+    #inner_thoughts_match = re.search(r'\[INNER THOUGHTS:(.*?)\]', response, re.DOTALL)
+    #spoken_match = re.search(r'\[SPOKEN:(.*?)\]', response, re.DOTALL)
     
-    if inner_thoughts_match:
-        inner_thoughts = inner_thoughts_match.group(1).strip()
-        print(f"\033[3m(thinking) {inner_thoughts}\033[0m")
+    #if inner_thoughts_match:
+        #inner_thoughts = inner_thoughts_match.group(1).strip()
+    #print(f"\[(thinking) {inner_thoughts}")
     
-    if spoken_match:
-        spoken = spoken_match.group(1).strip()
-        print(f"{spoken}")
-    else:
-        print(response)
+    #if spoken_match:
+        #spoken = spoken_match.group(1).strip()
+        #print(f"{spoken}")
+    #else:
+    print(response)
 
 if __name__ == "__main__":
     run_npc_conversation()
